@@ -1,0 +1,36 @@
+# Core data & ML
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.4
+scipy>=1.11
+
+# Gradient boosting
+lightgbm>=4.0
+xgboost>=2.0
+
+# Time series specific
+statsmodels>=0.14
+feature-engine>=1.6
+skforecast>=0.13
+sktime>=0.28
+
+# Nixtla ecosystem (optional but recommended)
+statsforecast>=1.7
+mlforecast>=0.13
+
+# Visualization
+matplotlib>=3.7
+seaborn>=0.13
+plotly>=5.18
+
+# Experiment tracking (used in later notebooks)
+mlflow>=2.9
+
+# Notebook environment
+jupyter>=1.0
+jupyterlab>=4.0
+ipykernel>=6.0
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
