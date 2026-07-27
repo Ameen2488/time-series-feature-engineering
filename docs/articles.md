@@ -8,7 +8,7 @@ that accompanies it, and the specific `src/` utilities it uses.
 ## Article 1 — Tabularizing Time Series
 
 - **Notebook:** [`notebooks/01_tabularizing_time_series.ipynb`](../notebooks/01_tabularizing_time_series.ipynb)
-- **Read:** [Medium](https://medium.com/@asidd24/article-1) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Read:** [Medium](https://medium.com/@asidd24/tabularizing-time-series-the-foundation-of-ml-based-forecasting-2070d22651ef) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
 - **Utilities used:**
   - `src.data.generate_daily_sales`
   - `src.data.time_train_test_split`

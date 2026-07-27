@@ -14,7 +14,7 @@ Each article in the series is paired with a self-contained Jupyter notebook, reu
 
 | # | Article | Notebook | Status |
 |---|---|---|---|
-| 1 | [Tabularizing Time Series: The Foundation of ML-Based Forecasting](https://medium.com/@asidd24/article-1) | [`01_tabularizing_time_series.ipynb`](notebooks/01_tabularizing_time_series.ipynb) | ✅ |
+| 1 | [Tabularizing Time Series: The Foundation of ML-Based Forecasting](https://medium.com/@asidd24/tabularizing-time-series-the-foundation-of-ml-based-forecasting-2070d22651ef) | [`01_tabularizing_time_series.ipynb`](notebooks/01_tabularizing_time_series.ipynb) | ✅ |
 | 2 | [Why Time Series Breaks Your ML Pipeline (And How to Fix It)](https://medium.com/@asidd24/article-2) | [`02_ml_pipeline_leakage.ipynb`](notebooks/02_ml_pipeline_leakage.ipynb) | 🔜 |
 | 3 | Decomposing Time Series: Separating Signal from Noise | `03_decomposition.ipynb` | 📝 |
 | 4 | Missing Data in Time Series: Beyond Simple Imputation | `04_missing_data.ipynb` | 📝 |
