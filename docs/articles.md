@@ -22,6 +22,7 @@ that accompanies it, and the specific `src/` utilities it uses.
 ## Article 2 — Why Time Series Breaks Your ML Pipeline
 
 - **Notebook:** [`notebooks/02_ml_pipeline_leakage.ipynb`](../notebooks/02_ml_pipeline_leakage.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/why-time-series-breaks-your-ml-pipeline-and-how-to-fix-it-3177886faa54) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
 - **Utilities used:** `src.validation.make_walk_forward_splitter`, `src.validation.describe_splits`
 
 ## Article 3 — Decomposing Time Series
