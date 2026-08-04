@@ -16,7 +16,7 @@ Each article in the series is paired with a self-contained Jupyter notebook, reu
 |---|---|---|---|
 | 1 | [Tabularizing Time Series: The Foundation of ML-Based Forecasting](https://medium.com/@asidd24/tabularizing-time-series-the-foundation-of-ml-based-forecasting-2070d22651ef) | [`01_tabularizing_time_series.ipynb`](notebooks/01_tabularizing_time_series.ipynb) | ✅ |
 | 2 | [Why Time Series Breaks Your ML Pipeline (And How to Fix It)](https://medium.com/@asidd24/why-time-series-breaks-your-ml-pipeline-and-how-to-fix-it-3177886faa54) | [`02_ml_pipeline_leakage.ipynb`](notebooks/02_ml_pipeline_leakage.ipynb) | ✅ |
-| 3 | Decomposing Time Series: Separating Signal from Noise | `03_decomposition.ipynb` | 📝 |
+| 3 | [Decomposing Time Series: Separating Signal from Noise](https://medium.com/@asidd24/decomposing-time-series-separating-signal-from-noise-f76b05f2bc9f?postPublishedType=initial) | [`03_decomposition.ipynb`](notebooks/03_decomposition.ipynb) | ✅ |
 | 4 | Missing Data in Time Series: Beyond Simple Imputation | `04_missing_data.ipynb` | 📝 |
 | 5 | Outlier Detection: Rolling Stats, LOWESS & STL | `05_outlier_detection.ipynb` | 📝 |
 | 6 | Lag Features: Teaching Your Model to Remember | `06_lag_features.ipynb` | 📝 |
