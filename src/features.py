@@ -352,3 +352,176 @@ def build_forecasting_feature_matrix(
         df = add_cyclical_encoding(df, "month", period=12, drop_original=False)
 
     return df.dropna()
+
+
+# ---------------------------------------------------------------------------
+# Missing Data Imputation & Missingness Features
+# ---------------------------------------------------------------------------
+
+def seasonal_fill(series: pd.Series, period: int = 7) -> pd.Series:
+    """
+    Fill missing values in a time series using the same-period value from previous cycles.
+
+    Falls back to linear interpolation for remaining gaps at the start of the series.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series with missing values (NaN).
+    period : int, default=7
+        Seasonal period length (e.g. 7 for weekly pattern on daily data).
+
+    Returns
+    -------
+    pd.Series
+        Series with missing values filled while preserving seasonal phase.
+    """
+    filled = series.copy()
+    n = len(filled)
+    for i in range(n):
+        if pd.isna(filled.iloc[i]) and i >= period:
+            lookback = period
+            while lookback <= 4 * period and (i - lookback >= 0) and pd.isna(filled.iloc[i - lookback]):
+                lookback += period
+            if (i - lookback >= 0) and not pd.isna(filled.iloc[i - lookback]):
+                filled.iloc[i] = filled.iloc[i - lookback]
+    return filled.interpolate(method="linear")
+
+
+def stl_imputation(series: pd.Series, period: int = 7) -> pd.Series:
+    """
+    Impute missing values using Seasonal and Trend decomposition using Loess (STL).
+
+    Ideal for long/extended gaps (e.g. 21 days) where linear interpolation or simple
+    forward fill destroys seasonal peaks and trend structure.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series with missing values.
+    period : int, default=7
+        Seasonal period length for STL.
+
+    Returns
+    -------
+    pd.Series
+        Imputed series with trend + seasonal components reconstructed over missing gaps.
+    """
+    from statsmodels.tsa.seasonal import STL
+
+    missing_mask = series.isna()
+    if not missing_mask.any():
+        return series.copy()
+
+    # Step 1: Rough linear interpolation to allow STL fitting
+    rough_fill = series.interpolate(method="linear").bfill().ffill()
+
+    # Step 2: Fit STL decomposition
+    stl = STL(rough_fill, period=period, robust=True).fit()
+
+    # Step 3: Reconstruct target as trend + seasonal
+    reconstructed = stl.trend + stl.seasonal
+
+    # Step 4: Overwrite missing positions with reconstructed values
+    filled = series.copy()
+    filled[missing_mask] = reconstructed[missing_mask]
+
+    return filled
+
+
+def add_missingness_features(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    """
+    Engineer explicit features capturing missingness patterns in target_col.
+
+    Creates:
+    - `{target_col}_was_missing`: Binary flag (1 if originally missing, 0 otherwise)
+    - `days_since_observed`: Consecutive steps since last valid observation
+    - `run_of_missing`: Current run length of consecutive missing values
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing target_col.
+    target_col : str
+        Column to track missingness on.
+
+    Returns
+    -------
+    pd.DataFrame with missingness indicator features appended.
+    """
+    df = df.copy()
+    is_na = df[target_col].isna()
+
+    # 1. Binary indicator
+    df[f"{target_col}_was_missing"] = is_na.astype(int)
+
+    # 2. Days / steps since last observed
+    obs_group = df[target_col].notna().cumsum()
+    df["days_since_observed"] = obs_group.eq(obs_group.shift()).groupby(obs_group).cumsum()
+
+    # 3. Current run length of missing values
+    df["run_of_missing"] = is_na.astype(int).groupby(df[target_col].notna().cumsum()).cumsum()
+
+    return df
+
+
+def robust_time_series_imputation(
+    series: pd.Series,
+    period: int = 7,
+    gap_threshold: int = 3,
+) -> pd.DataFrame:
+    """
+    Production-ready robust time series imputation pipeline.
+
+    Combines short-gap linear interpolation, long-gap STL reconstruction, and explicit
+    missingness feature generation into a single pipeline.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Target time series with missing values.
+    period : int, default=7
+        Seasonal period.
+    gap_threshold : int, default=3
+        Maximum gap length treated as a short gap (linear interpolation).
+        Gaps > gap_threshold use STL reconstruction.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing:
+        - `value`: Imputed time series values
+        - `was_missing`: Binary flag indicating original missing status
+        - `gap_size_at_position`: Size of the missing gap for missing entries
+    """
+    original_missing = series.isna().copy()
+
+    if not original_missing.any():
+        return pd.DataFrame({
+            "value": series.copy(),
+            "was_missing": 0,
+            "gap_size_at_position": 0,
+        }, index=series.index)
+
+    # Identify continuous gap sizes
+    gap_ids = original_missing.astype(int).diff().ne(0).cumsum()
+    gap_sizes = original_missing.groupby(gap_ids).transform("sum")
+
+    long_gap_mask = original_missing & (gap_sizes > gap_threshold)
+
+    # Step 1: Linear interpolation (covers short gaps)
+    filled = series.interpolate(method="linear").bfill().ffill()
+
+    # Step 2: STL reconstruction for long gaps
+    if long_gap_mask.any():
+        from statsmodels.tsa.seasonal import STL
+        stl = STL(filled, period=period, robust=True).fit()
+        reconstructed = stl.trend + stl.seasonal
+        filled[long_gap_mask] = reconstructed[long_gap_mask]
+
+    return pd.DataFrame({
+        "value": filled,
+        "was_missing": original_missing.astype(int),
+        "gap_size_at_position": gap_sizes.fillna(0).astype(int),
+    }, index=series.index)
+

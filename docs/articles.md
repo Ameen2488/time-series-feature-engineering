@@ -30,6 +30,12 @@ that accompanies it, and the specific `src/` utilities it uses.
 
 ## Article 4 — Missing Data
 - **Notebook:** [`notebooks/04_missing_data.ipynb`](../notebooks/04_missing_data.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/missing-data-in-time-series-beyond-simple-imputation-edae6e2543c7) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Utilities used:**
+  - `src.features.seasonal_fill`
+  - `src.features.stl_imputation`
+  - `src.features.add_missingness_features`
+  - `src.features.robust_time_series_imputation`
 
 ## Article 5 — Outlier Detection
 - **Notebook:** [`notebooks/05_outlier_detection.ipynb`](../notebooks/05_outlier_detection.ipynb)

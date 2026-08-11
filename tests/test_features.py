@@ -18,8 +18,12 @@ from src.features import (
     add_expanding_features,
     add_fourier_terms,
     add_lag_features,
+    add_missingness_features,
     add_rolling_features,
     build_forecasting_feature_matrix,
+    robust_time_series_imputation,
+    seasonal_fill,
+    stl_imputation,
 )
 
 
@@ -178,3 +182,42 @@ class TestFeatureMatrix:
         assert "target_lag_1" not in df.columns
         assert "target_lag_7" in df.columns
         assert "target_lag_14" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# Missing Data Tests
+# ---------------------------------------------------------------------------
+
+class TestMissingData:
+    def test_seasonal_fill(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[10] = np.nan  # missing at i=10 (should be filled from i=3)
+        filled = seasonal_fill(s, period=7)
+        assert not filled.isna().any()
+        assert filled.iloc[10] == s.iloc[3]
+
+    def test_stl_imputation(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[20:25] = np.nan
+        filled = stl_imputation(s, period=7)
+        assert not filled.isna().any()
+
+    def test_add_missingness_features(self, sample_df):
+        df = sample_df.copy()
+        df.iloc[5:8, df.columns.get_loc("target")] = np.nan
+        res = add_missingness_features(df, "target")
+        assert "target_was_missing" in res.columns
+        assert "days_since_observed" in res.columns
+        assert "run_of_missing" in res.columns
+        assert res.iloc[5]["target_was_missing"] == 1
+        assert res.iloc[0]["target_was_missing"] == 0
+
+    def test_robust_time_series_imputation(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[10:12] = np.nan  # short gap (2)
+        s.iloc[30:37] = np.nan  # long gap (7)
+        res = robust_time_series_imputation(s, period=7, gap_threshold=3)
+        assert not res["value"].isna().any()
+        assert "was_missing" in res.columns
+        assert "gap_size_at_position" in res.columns
+
