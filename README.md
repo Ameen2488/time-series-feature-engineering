@@ -18,7 +18,7 @@ Each article in the series is paired with a self-contained Jupyter notebook, reu
 | 2 | [Why Time Series Breaks Your ML Pipeline (And How to Fix It)](https://medium.com/@asidd24/why-time-series-breaks-your-ml-pipeline-and-how-to-fix-it-3177886faa54) | [`02_ml_pipeline_leakage.ipynb`](notebooks/02_ml_pipeline_leakage.ipynb) | ✅ |
 | 3 | [Decomposing Time Series: Separating Signal from Noise](https://medium.com/@asidd24/decomposing-time-series-separating-signal-from-noise-f76b05f2bc9f?postPublishedType=initial) | [`03_decomposition.ipynb`](notebooks/03_decomposition.ipynb) | ✅ |
 | 4 | [Missing Data in Time Series: Beyond Simple Imputation](https://medium.com/@asidd24/missing-data-in-time-series-beyond-simple-imputation-edae6e2543c7) | [`04_missing_data.ipynb`](notebooks/04_missing_data.ipynb) | ✅ |
-| 5 | Outlier Detection: Rolling Stats, LOWESS & STL | `05_outlier_detection.ipynb` | 📝 |
+| 5 | [Outlier Detection: Rolling Stats, LOWESS & STL](https://medium.com/@asidd24/outlier-detection-in-time-series-rolling-stats-lowess-stl-bc2af56a6276) | [`05_outlier_detection.ipynb`](notebooks/05_outlier_detection.ipynb) | ✅ |
 | 6 | Lag Features: Teaching Your Model to Remember | `06_lag_features.ipynb` | 📝 |
 | 7 | Window Features: Rolling, Expanding & Exponential Smoothing | `07_window_features.ipynb` | 📝 |
 | 8 | Trend Features: Making Tree-Based Models Extrapolate | `08_trend_features.ipynb` | 📝 |

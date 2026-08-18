@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from src.features import (
+    add_anomaly_features,
     add_cyclical_encoding,
     add_datetime_features,
     add_ewm_features,
@@ -21,8 +22,12 @@ from src.features import (
     add_missingness_features,
     add_rolling_features,
     build_forecasting_feature_matrix,
+    lowess_anomalies,
     robust_time_series_imputation,
+    rolling_iqr_bands,
+    rolling_zscore,
     seasonal_fill,
+    stl_anomalies,
     stl_imputation,
 )
 
@@ -220,4 +225,51 @@ class TestMissingData:
         assert not res["value"].isna().any()
         assert "was_missing" in res.columns
         assert "gap_size_at_position" in res.columns
+
+
+# ---------------------------------------------------------------------------
+# Outlier / Anomaly Detection Tests
+# ---------------------------------------------------------------------------
+
+class TestOutlierDetection:
+    def test_rolling_zscore_detects_spike(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[50] = 500.0  # massive spike
+        z = rolling_zscore(s, window=28)
+        assert abs(z.iloc[50]) > 3.0
+
+    def test_rolling_iqr_bands(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[50] = 500.0
+        lower, upper = rolling_iqr_bands(s, window=28, k=1.5)
+        assert s.iloc[50] > upper.iloc[50]
+
+    def test_lowess_anomalies(self, sample_series):
+        s = sample_series.copy()
+        s.iloc[50] = 500.0
+        anomalies = lowess_anomalies(s, frac=0.1, threshold_sigma=3.0)
+        assert len(anomalies) >= 1
+        assert s.index[50] in anomalies.index
+
+    def test_stl_anomalies(self, sample_series):
+        # Create series with weekly seasonality and injected spike
+        dates = pd.date_range("2024-01-01", periods=140, freq="D")
+        t = np.arange(140)
+        seasonal = 10 * np.sin(2 * np.pi * t / 7)
+        values = 50 + seasonal + np.random.normal(0, 1, 140)
+        values[70] = 150.0  # anomaly
+        s = pd.Series(values, index=dates)
+        anomalies = stl_anomalies(s, period=7, threshold_sigma=3.0)
+        assert len(anomalies) >= 1
+        assert dates[70] in anomalies.index
+
+    def test_add_anomaly_features(self, sample_series):
+        dates = pd.date_range("2024-01-01", periods=140, freq="D")
+        s = pd.Series(np.arange(140, dtype=float), index=dates)
+        feats = add_anomaly_features(s, period=7, threshold_sigma=3.0)
+        assert "stl_residual" in feats.columns
+        assert "residual_volatility" in feats.columns
+        assert "is_extreme_residual" in feats.columns
+        assert "days_since_last_anomaly" in feats.columns
+
 

@@ -38,7 +38,15 @@ that accompanies it, and the specific `src/` utilities it uses.
   - `src.features.robust_time_series_imputation`
 
 ## Article 5 — Outlier Detection
+
 - **Notebook:** [`notebooks/05_outlier_detection.ipynb`](../notebooks/05_outlier_detection.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/outlier-detection-in-time-series-rolling-stats-lowess-stl-bc2af56a6276) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Utilities used:**
+  - `src.features.rolling_zscore`
+  - `src.features.rolling_iqr_bands`
+  - `src.features.lowess_anomalies`
+  - `src.features.stl_anomalies`
+  - `src.features.add_anomaly_features`
 
 ## Article 6 — Lag Features
 - **Notebook:** [`notebooks/06_lag_features.ipynb`](../notebooks/06_lag_features.ipynb)

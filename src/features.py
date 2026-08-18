@@ -525,3 +525,188 @@ def robust_time_series_imputation(
         "gap_size_at_position": gap_sizes.fillna(0).astype(int),
     }, index=series.index)
 
+
+# ---------------------------------------------------------------------------
+# Outlier & Anomaly Detection
+# ---------------------------------------------------------------------------
+
+def rolling_zscore(series: pd.Series, window: int = 28) -> pd.Series:
+    """
+    Compute the rolling z-score of a series. Uses shift(1) before
+    rolling to prevent the current observation from contaminating
+    its own baseline.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series to compute z-scores on.
+    window : int, default=28
+        Rolling window size.
+
+    Returns
+    -------
+    pd.Series
+        Rolling z-scores.
+    """
+    rolling_mean = series.shift(1).rolling(window=window, min_periods=max(2, window // 4)).mean()
+    rolling_std = series.shift(1).rolling(window=window, min_periods=max(2, window // 4)).std()
+    return (series - rolling_mean) / rolling_std
+
+
+def rolling_iqr_bands(
+    series: pd.Series,
+    window: int = 28,
+    k: float = 1.5,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    Compute rolling upper and lower anomaly bands using the IQR rule:
+    lower = Q1 - k * IQR
+    upper = Q3 + k * IQR
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series to compute bands on.
+    window : int, default=28
+        Rolling window size.
+    k : float, default=1.5
+        IQR multiplier (Tukey boxplot convention).
+
+    Returns
+    -------
+    tuple[pd.Series, pd.Series]
+        (lower_band, upper_band)
+    """
+    q1 = series.shift(1).rolling(window=window, min_periods=max(4, window // 4)).quantile(0.25)
+    q3 = series.shift(1).rolling(window=window, min_periods=max(4, window // 4)).quantile(0.75)
+    iqr = q3 - q1
+    upper = q3 + k * iqr
+    lower = q1 - k * iqr
+    return lower, upper
+
+
+def lowess_anomalies(
+    series: pd.Series,
+    frac: float = 0.05,
+    threshold_sigma: float = 3.0,
+) -> pd.Series:
+    """
+    Fit LOWESS to the series. Flag observations whose residuals
+    exceed threshold_sigma standard deviations from the mean residual.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series.
+    frac : float, default=0.05
+        Fraction of data used when estimating each local fit.
+    threshold_sigma : float, default=3.0
+        Number of standard deviations for residual threshold.
+
+    Returns
+    -------
+    pd.Series
+        Subset of residuals corresponding to detected anomalies.
+    """
+    from statsmodels.nonparametric.smoothers_lowess import lowess
+
+    smoothed = lowess(
+        series.values,
+        np.arange(len(series)),
+        frac=frac,
+        return_sorted=False,
+    )
+    fit = pd.Series(smoothed, index=series.index)
+    residuals = series - fit
+
+    std_resid = residuals.std()
+    mean_resid = residuals.mean()
+    upper = mean_resid + threshold_sigma * std_resid
+    lower = mean_resid - threshold_sigma * std_resid
+    return residuals[(residuals > upper) | (residuals < lower)]
+
+
+def stl_anomalies(
+    series: pd.Series,
+    period: int = 7,
+    threshold_sigma: float = 3.0,
+) -> pd.Series:
+    """
+    STL residual-based anomaly detection.
+    Robust=True downweights outliers when fitting.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series.
+    period : int, default=7
+        Seasonal period.
+    threshold_sigma : float, default=3.0
+        Threshold in standard deviations of the residual.
+
+    Returns
+    -------
+    pd.Series
+        Subset of residuals corresponding to detected anomalies.
+    """
+    from statsmodels.tsa.seasonal import STL
+
+    stl = STL(series, period=period, robust=True).fit()
+    residuals = stl.resid
+
+    std_resid = residuals.std()
+    mean_resid = residuals.mean()
+    upper = mean_resid + threshold_sigma * std_resid
+    lower = mean_resid - threshold_sigma * std_resid
+    return residuals[(residuals > upper) | (residuals < lower)]
+
+
+def add_anomaly_features(
+    series: pd.Series,
+    period: int = 7,
+    threshold_sigma: float = 3.0,
+) -> pd.DataFrame:
+    """
+    Build anomaly-related features from a time series:
+    - The STL residual value itself
+    - Rolling std of STL residuals (regime-shift signal)
+    - Binary flag for extreme residuals
+    - Days/steps since last anomaly
+
+    Parameters
+    ----------
+    series : pd.Series
+        Target time series.
+    period : int, default=7
+        Seasonal period for STL.
+    threshold_sigma : float, default=3.0
+        Threshold multiplier on residual std.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with anomaly features.
+    """
+    from statsmodels.tsa.seasonal import STL
+
+    stl = STL(series, period=period, robust=True).fit()
+    residuals = stl.resid
+
+    threshold = threshold_sigma * residuals.std()
+
+    features = pd.DataFrame(index=series.index)
+    features["stl_residual"] = residuals
+    features["residual_volatility"] = residuals.shift(1).rolling(window=14, min_periods=2).std()
+    features["is_extreme_residual"] = (residuals.abs() > threshold).astype(int)
+
+    is_anomaly = features["is_extreme_residual"].astype(bool)
+    anomaly_group = is_anomaly.cumsum()
+    features["days_since_last_anomaly"] = (
+        (~is_anomaly)
+        .groupby(anomaly_group)
+        .cumcount()
+    )
+
+    return features
+
+
