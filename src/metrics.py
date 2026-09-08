@@ -60,7 +60,7 @@ def mase(y_true, y_pred, y_train, seasonality: int = 1) -> float:
     return float(np.mean(np.abs(y_true - y_pred)) / scale)
 
 
-def vandeput_score(y_true, y_pred) -> float:
+def vandeput_score(y_true, y_pred, benchmark=None) -> float:
     """
     Vandeput's Score = MAE + |Bias|.
 

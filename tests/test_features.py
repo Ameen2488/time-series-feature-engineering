@@ -19,9 +19,11 @@ from src.features import (
     add_expanding_features,
     add_fourier_terms,
     add_lag_features,
+    add_lag_features_horizon_aware,
     add_missingness_features,
     add_rolling_features,
     build_forecasting_feature_matrix,
+    cross_correlation,
     lowess_anomalies,
     robust_time_series_imputation,
     rolling_iqr_bands,
@@ -69,6 +71,30 @@ class TestLagFeatures:
     def test_negative_lag_rejected(self, sample_df):
         with pytest.raises(ValueError):
             add_lag_features(sample_df, "target", lags=[-1])
+
+    def test_horizon_aware_lag_filtering(self, sample_df):
+        # When horizon=7, lag_1 and lag_3 should be dropped, only lag_7 and lag_14 retained
+        with pytest.warns(UserWarning, match="Dropped lags"):
+            result = add_lag_features_horizon_aware(
+                sample_df, "target", lags=[1, 3, 7, 14], forecast_horizon=7
+            )
+        assert "target_lag_7" in result.columns
+        assert "target_lag_14" in result.columns
+        assert "target_lag_1" not in result.columns
+        assert "target_lag_3" not in result.columns
+
+    def test_cross_correlation(self):
+        # Create target and leading exogenous variable (exog leads target by 3 days)
+        np.random.seed(42)
+        exog = pd.Series(np.random.randn(200))
+        target = exog.shift(3) + 0.1 * pd.Series(np.random.randn(200))
+        
+        lags, corrs = cross_correlation(target, exog, max_lag=10)
+        assert len(lags) == 21
+        assert 3 in lags
+        peak_lag = lags[int(np.argmax(corrs))]
+        assert peak_lag == 3
+
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +149,14 @@ class TestExpandingFeatures:
         valid = result.dropna(subset=["target_expand_mean"]).iloc[1:]
         assert (valid["target_expand_mean"] < valid["target"]).all()
 
+    def test_expanding_min_periods(self, sample_df):
+        result = add_expanding_features(
+            sample_df, "target", functions=["mean"], min_periods=7, min_horizon=1
+        )
+        # With min_horizon=1 and min_periods=7, indices 0..6 should be NaN
+        assert result["target_expand_mean"].iloc[:7].isna().all()
+        assert not np.isnan(result["target_expand_mean"].iloc[7])
+
 
 # ---------------------------------------------------------------------------
 # EWM features
@@ -136,6 +170,15 @@ class TestEWMFeatures:
         valid = result.dropna(subset=["target_ewm_span_7"]).iloc[7:]
         # EWM at t uses target[0:t-1], strictly < target[t] for increasing series
         assert (valid["target_ewm_span_7"] < valid["target"]).all()
+
+    def test_ewm_adjust_parameter(self, sample_df):
+        res_false = add_ewm_features(sample_df, "target", spans=[7], adjust=False)
+        res_true = add_ewm_features(sample_df, "target", spans=[7], adjust=True)
+        # Early values differ between adjust=True and adjust=False
+        assert not np.isclose(
+            res_false["target_ewm_span_7"].iloc[2],
+            res_true["target_ewm_span_7"].iloc[2],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +230,19 @@ class TestFeatureMatrix:
         assert "target_lag_1" not in df.columns
         assert "target_lag_7" in df.columns
         assert "target_lag_14" in df.columns
+
+    def test_expanding_and_ewm_in_feature_matrix(self, sample_series):
+        df = build_forecasting_feature_matrix(
+            sample_series,
+            lags=[1, 7],
+            rolling_windows=[7],
+            expanding_functions=["mean", "std"],
+            ewm_spans=[7, 30],
+        )
+        assert "target_expand_mean" in df.columns
+        assert "target_expand_std" in df.columns
+        assert "target_ewm_span_7" in df.columns
+        assert "target_ewm_span_30" in df.columns
 
 
 # ---------------------------------------------------------------------------

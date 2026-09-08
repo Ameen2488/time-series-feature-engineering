@@ -19,8 +19,8 @@ Each article in the series is paired with a self-contained Jupyter notebook, reu
 | 3 | [Decomposing Time Series: Separating Signal from Noise](https://medium.com/@asidd24/decomposing-time-series-separating-signal-from-noise-f76b05f2bc9f?postPublishedType=initial) | [`03_decomposition.ipynb`](notebooks/03_decomposition.ipynb) | ✅ |
 | 4 | [Missing Data in Time Series: Beyond Simple Imputation](https://medium.com/@asidd24/missing-data-in-time-series-beyond-simple-imputation-edae6e2543c7) | [`04_missing_data.ipynb`](notebooks/04_missing_data.ipynb) | ✅ |
 | 5 | [Outlier Detection: Rolling Stats, LOWESS & STL](https://medium.com/@asidd24/outlier-detection-in-time-series-rolling-stats-lowess-stl-bc2af56a6276) | [`05_outlier_detection.ipynb`](notebooks/05_outlier_detection.ipynb) | ✅ |
-| 6 | Lag Features: Teaching Your Model to Remember | `06_lag_features.ipynb` | 📝 |
-| 7 | Window Features: Rolling, Expanding & Exponential Smoothing | `07_window_features.ipynb` | 📝 |
+| 6 | [Lag Features: Teaching Your Model to Remember the Past](https://medium.com/@asidd24/lag-features-teaching-your-model-to-remember-the-past-005a0493ed32?postPublishedType=initial) | [`06_lag_features.ipynb`](notebooks/06_lag_features.ipynb) | ✅ |
+| 7 | [Window Features: Rolling, Expanding & Exponential Smoothing](https://medium.com/@asidd24/window-features-rolling-expanding-exponential-smoothing-b8470fd0bbbf?postPublishedType=initial) | [`07_window_features.ipynb`](notebooks/07_window_features.ipynb) | ✅ |
 | 8 | Trend Features: Making Tree-Based Models Extrapolate | `08_trend_features.ipynb` | 📝 |
 | 9 | Seasonality Features: Dummies, Fourier Terms & Beyond | `09_seasonality.ipynb` | 📝 |
 | 10 | Datetime & Categorical Features: The Last Mile | `10_datetime_categorical.ipynb` | 📝 |

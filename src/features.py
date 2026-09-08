@@ -51,6 +51,88 @@ def add_lag_features(
     return df
 
 
+def add_lag_features_horizon_aware(
+    df: pd.DataFrame,
+    target_col: str,
+    lags: Sequence[int],
+    forecast_horizon: int = 1,
+    prefix: str | None = None,
+) -> pd.DataFrame:
+    """
+    Add lag features, dropping any lag smaller than the forecast horizon.
+
+    Guarantees no temporal leakage in multi-step forecasting scenarios.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    target_col : str
+        Column to lag.
+    lags : sequence of int
+        Candidate lag periods.
+    forecast_horizon : int, default=1
+        Forecast horizon H. Any lag < H will be dropped with a warning.
+    prefix : str, optional
+        Column name prefix. Defaults to f"{target_col}_lag".
+
+    Returns
+    -------
+    pd.DataFrame with valid horizon-aware lag columns appended.
+    """
+    if forecast_horizon < 1:
+        raise ValueError("forecast_horizon must be >= 1.")
+
+    valid_lags = [lag for lag in lags if lag >= forecast_horizon]
+    if len(valid_lags) < len(lags):
+        dropped = [lag for lag in lags if lag < forecast_horizon]
+        import warnings
+        warnings.warn(
+            f"Dropped lags {dropped} — smaller than forecast horizon ({forecast_horizon}).",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return add_lag_features(df, target_col=target_col, lags=valid_lags, prefix=prefix)
+
+
+def cross_correlation(
+    target: pd.Series,
+    exog: pd.Series,
+    max_lag: int = 20,
+) -> tuple[list[int], list[float]]:
+    """
+    Compute cross-correlation function (CCF) between target and exogenous variable.
+
+    Positive lag indicates `exog` leads `target` by `k` periods: corr(target_t, exog_{t-k}).
+    Negative lag indicates `target` leads `exog` by `k` periods.
+
+    Parameters
+    ----------
+    target : pd.Series
+        Target time series.
+    exog : pd.Series
+        Exogenous time series.
+    max_lag : int, default=20
+        Maximum lag to evaluate in both directions.
+
+    Returns
+    -------
+    tuple of (lags, correlations)
+        lags : list of int from -max_lag to +max_lag
+        correlations : list of float Pearson correlations
+    """
+    ccf_vals = []
+    lags = list(range(-max_lag, max_lag + 1))
+    for lag in lags:
+        corr = target.corr(exog.shift(lag))
+        ccf_vals.append(float(corr) if not pd.isna(corr) else 0.0)
+
+    return lags, ccf_vals
+
+
+
+
 # ---------------------------------------------------------------------------
 # Window features (rolling & expanding statistics)
 # ---------------------------------------------------------------------------
@@ -61,6 +143,7 @@ def add_rolling_features(
     windows: Sequence[int],
     functions: Sequence[str] = ("mean", "std"),
     min_horizon: int = 1,
+    min_periods: int | None = None,
     prefix: str | None = None,
 ) -> pd.DataFrame:
     """
@@ -83,6 +166,9 @@ def add_rolling_features(
         'median', 'sum', 'skew', 'kurt').
     min_horizon : int
         Number of periods to shift before rolling. Must be >= 1.
+    min_periods : int, optional
+        Minimum number of observations in window required to have a value.
+        Defaults to 1.
     prefix : str, optional
         Column name prefix. Defaults to f"{target_col}_roll".
 
@@ -98,9 +184,10 @@ def add_rolling_features(
     df = df.copy()
     prefix = prefix or f"{target_col}_roll"
     shifted = df[target_col].shift(min_horizon)
+    mp = min_periods if min_periods is not None else 1
 
     for window in windows:
-        rolling = shifted.rolling(window=window, min_periods=1)
+        rolling = shifted.rolling(window=window, min_periods=mp)
         for func in functions:
             col = f"{prefix}_{func}_{window}"
             df[col] = getattr(rolling, func)()
@@ -112,11 +199,32 @@ def add_expanding_features(
     df: pd.DataFrame,
     target_col: str,
     functions: Sequence[str] = ("mean", "std"),
+    min_periods: int = 1,
     min_horizon: int = 1,
     prefix: str | None = None,
 ) -> pd.DataFrame:
     """
     Add expanding window features (cumulative statistics over all past values).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    target_col : str
+        Column to compute expanding features on.
+    functions : sequence of str
+        Names of pandas rolling/expanding reductions ('mean', 'std', 'min', 'max', etc.).
+    min_periods : int, default=1
+        Minimum number of observations required to calculate statistic.
+        Setting e.g. min_periods=7 prevents early series variance instability.
+    min_horizon : int, default=1
+        Number of periods to shift before expanding calculation. Must be >= 1.
+    prefix : str, optional
+        Column name prefix. Defaults to f"{target_col}_expand".
+
+    Returns
+    -------
+    pd.DataFrame with new expanding feature columns appended.
     """
     if min_horizon < 1:
         raise ValueError("min_horizon must be >= 1.")
@@ -127,7 +235,7 @@ def add_expanding_features(
 
     for func in functions:
         col = f"{prefix}_{func}"
-        df[col] = getattr(shifted.expanding(min_periods=1), func)()
+        df[col] = getattr(shifted.expanding(min_periods=min_periods), func)()
 
     return df
 
@@ -136,11 +244,32 @@ def add_ewm_features(
     df: pd.DataFrame,
     target_col: str,
     spans: Sequence[int],
+    adjust: bool = False,
     min_horizon: int = 1,
     prefix: str | None = None,
 ) -> pd.DataFrame:
     """
     Add exponentially-weighted moving average features.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    target_col : str
+        Column to compute EWM features on.
+    spans : sequence of int
+        Spans for exponential weighting (e.g. [7, 30, 90]).
+    adjust : bool, default=False
+        If False, calculates weights exponentially decaying without dividing
+        by decaying adjustment factor. Matches standard time series conventions.
+    min_horizon : int, default=1
+        Number of periods to shift before computing EWM. Must be >= 1.
+    prefix : str, optional
+        Column name prefix. Defaults to f"{target_col}_ewm".
+
+    Returns
+    -------
+    pd.DataFrame with new EWM feature columns appended.
     """
     if min_horizon < 1:
         raise ValueError("min_horizon must be >= 1.")
@@ -150,7 +279,7 @@ def add_ewm_features(
     shifted = df[target_col].shift(min_horizon)
 
     for span in spans:
-        df[f"{prefix}_span_{span}"] = shifted.ewm(span=span, adjust=False).mean()
+        df[f"{prefix}_span_{span}"] = shifted.ewm(span=span, adjust=adjust).mean()
 
     return df
 
@@ -301,14 +430,16 @@ def build_forecasting_feature_matrix(
     lags: Sequence[int] = (1, 7, 14, 28),
     rolling_windows: Sequence[int] = (7, 14, 28),
     rolling_functions: Sequence[str] = ("mean", "std"),
+    expanding_functions: Sequence[str] | None = None,
+    ewm_spans: Sequence[int] | None = None,
     forecast_horizon: int = 1,
     include_datetime: bool = True,
 ) -> pd.DataFrame:
     """
     Build a complete, leakage-safe feature matrix for time series forecasting.
 
-    Convenience wrapper combining lag, rolling, and datetime features.
-    All rolling and lag operations respect the given forecast_horizon.
+    Convenience wrapper combining lag, rolling, expanding, EWM, and datetime features.
+    All rolling, expanding, EWM, and lag operations respect the given forecast_horizon.
 
     Parameters
     ----------
@@ -318,6 +449,10 @@ def build_forecasting_feature_matrix(
         Lag periods. All lags must be >= forecast_horizon to be usable.
     rolling_windows : sequence of int
     rolling_functions : sequence of str
+    expanding_functions : sequence of str, optional
+        Names of expanding reductions to compute ('mean', 'std', etc.).
+    ewm_spans : sequence of int, optional
+        Spans for exponentially-weighted moving averages (e.g. [7, 30]).
     forecast_horizon : int
         Minimum shift applied before any rolling / lag operation.
     include_datetime : bool
@@ -344,6 +479,20 @@ def build_forecasting_feature_matrix(
         df, target_col, rolling_windows, rolling_functions,
         min_horizon=forecast_horizon,
     )
+
+    # Expanding features
+    if expanding_functions:
+        df = add_expanding_features(
+            df, target_col, functions=expanding_functions,
+            min_horizon=forecast_horizon,
+        )
+
+    # EWM features
+    if ewm_spans:
+        df = add_ewm_features(
+            df, target_col, spans=ewm_spans,
+            min_horizon=forecast_horizon,
+        )
 
     # Datetime features
     if include_datetime:
@@ -588,6 +737,7 @@ def rolling_iqr_bands(
 def lowess_anomalies(
     series: pd.Series,
     frac: float = 0.05,
+    it: int = 0,
     threshold_sigma: float = 3.0,
 ) -> pd.Series:
     """
@@ -600,6 +750,9 @@ def lowess_anomalies(
         Time series.
     frac : float, default=0.05
         Fraction of data used when estimating each local fit.
+    it : int, default=0
+        Number of robustifying iterations in LOWESS. Set to 0 to prevent
+        extreme outliers from collapsing local weights back to self-values.
     threshold_sigma : float, default=3.0
         Number of standard deviations for residual threshold.
 
@@ -614,6 +767,7 @@ def lowess_anomalies(
         series.values,
         np.arange(len(series)),
         frac=frac,
+        it=it,
         return_sorted=False,
     )
     fit = pd.Series(smoothed, index=series.index)

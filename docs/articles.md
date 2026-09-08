@@ -48,11 +48,31 @@ that accompanies it, and the specific `src/` utilities it uses.
   - `src.features.stl_anomalies`
   - `src.features.add_anomaly_features`
 
-## Article 6 — Lag Features
-- **Notebook:** [`notebooks/06_lag_features.ipynb`](../notebooks/06_lag_features.ipynb)
+## Article 6 — Lag Features: Teaching Your Model to Remember the Past
 
-## Article 7 — Window Features
+- **Notebook:** [`notebooks/06_lag_features.ipynb`](../notebooks/06_lag_features.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/lag-features-teaching-your-model-to-remember-the-past-005a0493ed32?postPublishedType=initial) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Utilities used:**
+  - `src.features.add_lag_features`
+  - `src.features.add_lag_features_horizon_aware`
+  - `src.features.cross_correlation`
+  - `src.features.add_rolling_features`
+  - `src.features.add_datetime_features`
+  - `src.metrics.wmape`, `vandeput_score`
+
+
+## Article 7 — Window Features: Rolling, Expanding & Exponential Smoothing
+
 - **Notebook:** [`notebooks/07_window_features.ipynb`](../notebooks/07_window_features.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/window-features-rolling-expanding-exponential-smoothing-b8470fd0bbbf?postPublishedType=initial) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Utilities used:**
+  - `src.features.add_rolling_features`
+  - `src.features.add_expanding_features`
+  - `src.features.add_ewm_features`
+  - `src.features.add_lag_features`
+  - `src.features.build_forecasting_feature_matrix`
+  - `src.metrics.wmape`, `vandeput_score`
+
 
 ## Article 8 — Trend Features
 - **Notebook:** [`notebooks/08_trend_features.ipynb`](../notebooks/08_trend_features.ipynb)
