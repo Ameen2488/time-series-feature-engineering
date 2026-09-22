@@ -74,8 +74,18 @@ that accompanies it, and the specific `src/` utilities it uses.
   - `src.metrics.wmape`, `vandeput_score`
 
 
-## Article 8 — Trend Features
+## Article 8 — Trend Features: Making Tree-Based Models Extrapolate
+
 - **Notebook:** [`notebooks/08_trend_features.ipynb`](../notebooks/08_trend_features.ipynb)
+- **Read:** [Medium](https://medium.com/@asidd24/trend-features-making-tree-based-models-extrapolate-11af78cc2435) · [Newsletter](https://www.linkedin.com/newsletters/time-series-engineered-7485187061080137728/)
+- **Utilities used:**
+  - `src.features.add_linear_trend`
+  - `src.features.add_polynomial_trend`
+  - `src.features.add_piecewise_trend`
+  - `src.features.detrend_series`
+  - `src.features.build_forecasting_feature_matrix`
+  - `src.metrics.mae`, `rmse`, `wmape`, `bias`, `vandeput_score`
+  - `src.validation.make_walk_forward_splitter`
 
 ## Article 9 — Seasonality Features
 - **Notebook:** [`notebooks/09_seasonality.ipynb`](../notebooks/09_seasonality.ipynb)

@@ -20,10 +20,14 @@ from src.features import (
     add_fourier_terms,
     add_lag_features,
     add_lag_features_horizon_aware,
+    add_linear_trend,
     add_missingness_features,
+    add_piecewise_trend,
+    add_polynomial_trend,
     add_rolling_features,
     build_forecasting_feature_matrix,
     cross_correlation,
+    detrend_series,
     lowess_anomalies,
     robust_time_series_imputation,
     rolling_iqr_bands,
@@ -208,6 +212,86 @@ class TestFourierTerms:
 
 
 # ---------------------------------------------------------------------------
+# Trend features
+# ---------------------------------------------------------------------------
+
+class TestTrendFeatures:
+    def test_linear_trend_correctness(self, sample_df):
+        result = add_linear_trend(sample_df)
+        assert "t_index" in result.columns
+        assert (result["t_index"].values == np.arange(len(sample_df))).all()
+
+    def test_linear_trend_custom_name(self, sample_df):
+        res1 = add_linear_trend(sample_df, col_name="time_step")
+        assert "time_step" in res1.columns
+
+        res2 = add_linear_trend(sample_df, prefix="custom")
+        assert "custom_index" in res2.columns
+
+    def test_polynomial_trend_correctness(self, sample_df):
+        result = add_polynomial_trend(sample_df, degree=2)
+        assert "t_index" in result.columns
+        assert "t_squared" in result.columns
+        assert (result["t_squared"].values == np.arange(len(sample_df)) ** 2).all()
+
+    def test_polynomial_trend_warnings_and_errors(self, sample_df):
+        with pytest.raises(ValueError, match="degree must be >= 1"):
+            add_polynomial_trend(sample_df, degree=0)
+
+        with pytest.warns(UserWarning, match="Polynomial degree 3 > 2"):
+            res3 = add_polynomial_trend(sample_df, degree=3)
+            assert "t_cubed" in res3.columns
+
+    def test_piecewise_trend_correctness(self, sample_df):
+        changepoints = [20, 50]
+        result = add_piecewise_trend(sample_df, changepoints=changepoints)
+        assert "t_index" in result.columns
+        assert "trend_after_20" in result.columns
+        assert "trend_after_50" in result.columns
+
+        # Before changepoint, knot is strictly 0
+        assert (result.iloc[:21]["trend_after_20"] == 0).all()
+        # After changepoint, knot equals t - cp
+        assert result.iloc[25]["trend_after_20"] == 5
+        assert result.iloc[60]["trend_after_50"] == 10
+
+    def test_piecewise_trend_out_of_bounds(self, sample_df):
+        with pytest.raises(ValueError, match="out of bounds"):
+            add_piecewise_trend(sample_df, changepoints=[200])
+
+    def test_detrend_series_correctness_and_leakage(self, sample_series):
+        # Monotonic linear series with slope=2, intercept=10
+        dates = sample_series.index
+        t = np.arange(len(dates))
+        y = pd.Series(10.0 + 2.0 * t, index=dates, name="sales")
+
+        # Fit only on first 70 observations
+        detrended, trend_line, model = detrend_series(y, train_end_idx=70)
+
+        # 1. Model slope should be 2.0
+        assert pytest.approx(model.coef_[0]) == 2.0
+        assert pytest.approx(model.intercept_) == 10.0
+
+        # 2. Detrended series on training split has near-zero residuals
+        assert pytest.approx(detrended.iloc[:70].abs().max(), abs=1e-6) == 0.0
+
+        # 3. Detrended series on extrapolated test split also has near-zero residuals
+        # because ground truth was pure linear
+        assert pytest.approx(detrended.iloc[70:].abs().max(), abs=1e-6) == 0.0
+
+        # 4. Length and indices preserved
+        assert len(detrended) == len(y)
+        assert (detrended.index == y.index).all()
+        assert (trend_line.index == y.index).all()
+
+    def test_detrend_series_invalid_train_end(self, sample_series):
+        with pytest.raises(ValueError, match="train_end_idx"):
+            detrend_series(sample_series, train_end_idx=0)
+        with pytest.raises(ValueError, match="train_end_idx"):
+            detrend_series(sample_series, train_end_idx=len(sample_series) + 10)
+
+
+# ---------------------------------------------------------------------------
 # End-to-end feature matrix
 # ---------------------------------------------------------------------------
 
@@ -243,6 +327,26 @@ class TestFeatureMatrix:
         assert "target_expand_std" in df.columns
         assert "target_ewm_span_7" in df.columns
         assert "target_ewm_span_30" in df.columns
+
+    def test_trend_in_feature_matrix(self, sample_series):
+        # Linear trend
+        df_lin = build_forecasting_feature_matrix(
+            sample_series, lags=[1, 7], rolling_windows=[7], trend="linear"
+        )
+        assert "t_index" in df_lin.columns
+
+        # Polynomial trend
+        df_poly = build_forecasting_feature_matrix(
+            sample_series, lags=[1, 7], rolling_windows=[7], trend="polynomial"
+        )
+        assert "t_index" in df_poly.columns
+        assert "t_squared" in df_poly.columns
+
+        # Invalid trend
+        with pytest.raises(ValueError, match="Unsupported trend"):
+            build_forecasting_feature_matrix(
+                sample_series, lags=[1, 7], rolling_windows=[7], trend="unsupported"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -422,6 +422,175 @@ def add_fourier_terms(
 
 
 # ---------------------------------------------------------------------------
+# Trend features
+# ---------------------------------------------------------------------------
+
+def add_linear_trend(
+    df: pd.DataFrame,
+    col_name: str | None = None,
+    prefix: str | None = None,
+) -> pd.DataFrame:
+    """
+    Add a monotonically increasing integer time index feature (0, 1, 2, ..., N-1).
+
+    Tree-based models cannot extrapolate outside the training target range,
+    flatlining at the maximum seen level. A linear time index forces tree splits
+    at test time to route into the highest-trend terminal leaf, recovering the trend.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    col_name : str, optional
+        Explicit column name. Defaults to 't_index' (or f'{prefix}_index' if prefix is set).
+    prefix : str, optional
+        Prefix for the column name if col_name is not provided.
+
+    Returns
+    -------
+    pd.DataFrame with linear trend column appended.
+    """
+    df = df.copy()
+    name = col_name or (f"{prefix}_index" if prefix else "t_index")
+    df[name] = np.arange(len(df))
+    return df
+
+
+def add_polynomial_trend(
+    df: pd.DataFrame,
+    degree: int = 2,
+    prefix: str = "t",
+) -> pd.DataFrame:
+    """
+    Add polynomial trend features (e.g. t_index, t_squared, t_cubed).
+
+    Useful for modeling accelerating or decelerating non-linear growth curves.
+    Note: higher-degree polynomials extrapolate wildly outside the training range.
+    In practice, degree > 2 is strongly discouraged in favor of piecewise trends.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    degree : int, default=2
+        Maximum polynomial degree. Warns if degree > 2.
+    prefix : str, default='t'
+        Base prefix for polynomial columns.
+
+    Returns
+    -------
+    pd.DataFrame with polynomial trend columns appended.
+    """
+    if degree < 1:
+        raise ValueError("degree must be >= 1.")
+
+    if degree > 2:
+        import warnings
+        warnings.warn(
+            f"Polynomial degree {degree} > 2 carries severe extrapolation risk outside the training range. "
+            "Consider using add_piecewise_trend instead.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    df = df.copy()
+    t = np.arange(len(df))
+    df[f"{prefix}_index"] = t
+
+    names_map = {2: f"{prefix}_squared", 3: f"{prefix}_cubed"}
+    for d in range(2, degree + 1):
+        col = names_map.get(d, f"{prefix}_pow_{d}")
+        df[col] = t ** d
+
+    return df
+
+
+def add_piecewise_trend(
+    df: pd.DataFrame,
+    changepoints: Sequence[int],
+    prefix: str = "trend",
+) -> pd.DataFrame:
+    """
+    Add a linear time index plus knot features at each changepoint.
+
+    Each knot feature is np.maximum(0, t - cp), which is 0 before the changepoint
+    and grows linearly after, allowing the tree or linear model to learn
+    different slopes for distinct trend regimes without overfitting.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted chronologically.
+    changepoints : sequence of int
+        Integer index positions where trend regimes change.
+    prefix : str, default='trend'
+        Column name prefix for changepoint knots.
+
+    Returns
+    -------
+    pd.DataFrame with t_index and piecewise knot columns appended.
+    """
+    df = df.copy()
+    t = np.arange(len(df))
+    df["t_index"] = t
+
+    for cp in changepoints:
+        if cp < 0 or cp >= len(df):
+            raise ValueError(f"Changepoint {cp} is out of bounds for DataFrame of length {len(df)}.")
+        df[f"{prefix}_after_{cp}"] = np.maximum(0, t - cp)
+
+    return df
+
+
+def detrend_series(
+    series: pd.Series,
+    train_end_idx: int | None = None,
+) -> tuple[pd.Series, pd.Series, object]:
+    """
+    Fit a linear trend on the training portion and detrend the series.
+
+    Strictly leakage-safe: the linear regression model is fit ONLY on
+    observations up to `train_end_idx`. The fitted trend is then evaluated
+    over the full series length and subtracted to yield stationary residuals.
+
+    Parameters
+    ----------
+    series : pd.Series
+        Time series to detrend.
+    train_end_idx : int, optional
+        Index integer up to which data is considered training data.
+        If None, fits across the full series (only suitable for final deployment).
+
+    Returns
+    -------
+    tuple of (detrended_series, trend_line, linear_model)
+        detrended_series : pd.Series
+            Target series with linear trend subtracted (y - trend).
+        trend_line : pd.Series
+            Fitted and extrapolated linear trend values with identical index.
+        linear_model : LinearRegression
+            The fitted scikit-learn LinearRegression instance.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    n = len(series)
+    t = np.arange(n).reshape(-1, 1)
+
+    end_idx = train_end_idx if train_end_idx is not None else n
+    if end_idx <= 0 or end_idx > n:
+        raise ValueError(f"train_end_idx must be in [1, {n}], got {train_end_idx}.")
+
+    model = LinearRegression()
+    model.fit(t[:end_idx], series.values[:end_idx])
+
+    trend_vals = model.predict(t)
+    trend_line = pd.Series(trend_vals, index=series.index, name=f"{series.name or 'target'}_trend")
+    detrended = pd.Series(series.values - trend_vals, index=series.index, name=f"{series.name or 'target'}_detrended")
+
+    return detrended, trend_line, model
+
+
+# ---------------------------------------------------------------------------
 # Convenience: build the full leakage-safe feature matrix
 # ---------------------------------------------------------------------------
 
@@ -434,11 +603,12 @@ def build_forecasting_feature_matrix(
     ewm_spans: Sequence[int] | None = None,
     forecast_horizon: int = 1,
     include_datetime: bool = True,
+    trend: str | None = None,
 ) -> pd.DataFrame:
     """
     Build a complete, leakage-safe feature matrix for time series forecasting.
 
-    Convenience wrapper combining lag, rolling, expanding, EWM, and datetime features.
+    Convenience wrapper combining lag, rolling, expanding, EWM, datetime, and trend features.
     All rolling, expanding, EWM, and lag operations respect the given forecast_horizon.
 
     Parameters
@@ -456,6 +626,9 @@ def build_forecasting_feature_matrix(
     forecast_horizon : int
         Minimum shift applied before any rolling / lag operation.
     include_datetime : bool
+    trend : {'linear', 'polynomial'} or None, optional
+        Optional trend feature to include. 'linear' adds 't_index',
+        'polynomial' adds 't_index' and 't_squared'.
 
     Returns
     -------
@@ -499,6 +672,15 @@ def build_forecasting_feature_matrix(
         df = add_datetime_features(df)
         df = add_cyclical_encoding(df, "dayofweek", period=7, drop_original=False)
         df = add_cyclical_encoding(df, "month", period=12, drop_original=False)
+
+    # Trend features
+    if trend is not None:
+        if trend == "linear":
+            df = add_linear_trend(df)
+        elif trend == "polynomial":
+            df = add_polynomial_trend(df, degree=2)
+        else:
+            raise ValueError(f"Unsupported trend: {trend}. Choose 'linear', 'polynomial', or None.")
 
     return df.dropna()
 
