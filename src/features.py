@@ -422,6 +422,61 @@ def add_fourier_terms(
 
 
 # ---------------------------------------------------------------------------
+# Seasonal feature recipe (Article 9)
+# ---------------------------------------------------------------------------
+
+def add_seasonal_features(
+    df: pd.DataFrame,
+    yearly_k: int = 6,
+    include_dow_dummies: bool = True,
+    fourier_prefix: str = "fy",
+) -> pd.DataFrame:
+    """
+    The complete seasonal feature set for a daily series.
+
+    Assembles:
+    - 7 day-of-week one-hot dummies (short cycle, irregular shape)
+    - 2*yearly_k yearly Fourier columns (long cycle, smooth shape)
+
+    With the defaults (yearly_k=6) this produces 7 + 12 = 19 columns.
+
+    **Build this on the full contiguous frame, before any train/test split.**
+    Fourier terms index off ``t = np.arange(len(df))`` starting at row 0;
+    building separately on train and test restarts the phase at zero and
+    silently misaligns every seasonal column.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must have a sorted DatetimeIndex.
+    yearly_k : int, default=6
+        Number of Fourier pairs for yearly seasonality. K=6 is a good
+        default for daily data; tune by held-out error.
+    include_dow_dummies : bool, default=True
+        If True, add 7 day-of-week dummies. Set to False if your lag
+        features already span the weekly cycle and dummies are redundant.
+    fourier_prefix : str, default='fy'
+        Column name prefix for yearly Fourier columns.
+
+    Returns
+    -------
+    pd.DataFrame with seasonal feature columns appended.
+    """
+    df = df.copy()
+
+    if include_dow_dummies:
+        df = add_datetime_features(df, features=("dayofweek",))
+        dow = pd.get_dummies(df["dayofweek"], prefix="dow").astype(int)
+        df = pd.concat([df.drop(columns="dayofweek"), dow], axis=1)
+
+    if yearly_k > 0:
+        df = add_fourier_terms(df, period=365.25, n_terms=yearly_k,
+                               prefix=fourier_prefix)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Trend features
 # ---------------------------------------------------------------------------
 

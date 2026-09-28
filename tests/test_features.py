@@ -25,6 +25,7 @@ from src.features import (
     add_piecewise_trend,
     add_polynomial_trend,
     add_rolling_features,
+    add_seasonal_features,
     build_forecasting_feature_matrix,
     cross_correlation,
     detrend_series,
@@ -209,6 +210,116 @@ class TestFourierTerms:
         for k in range(1, 4):
             assert f"fourier_sin_{k}" in result.columns
             assert f"fourier_cos_{k}" in result.columns
+
+    def test_fourier_values_bounded(self, sample_df):
+        result = add_fourier_terms(sample_df, period=365.25, n_terms=6)
+        fourier_cols = [c for c in result.columns if c.startswith("fourier_")]
+        for col in fourier_cols:
+            assert result[col].between(-1, 1).all(), f"{col} out of [-1, 1]"
+
+    def test_fourier_custom_prefix(self, sample_df):
+        result = add_fourier_terms(sample_df, period=365.25, n_terms=2, prefix="fy")
+        assert "fy_sin_1" in result.columns
+        assert "fy_cos_2" in result.columns
+
+    def test_fourier_column_count(self, sample_df):
+        result = add_fourier_terms(sample_df, period=365.25, n_terms=6)
+        fourier_cols = [c for c in result.columns if c.startswith("fourier_")]
+        assert len(fourier_cols) == 12  # 6 sin + 6 cos
+
+
+# ---------------------------------------------------------------------------
+# Seasonal features (Article 9 recipe)
+# ---------------------------------------------------------------------------
+
+class TestSeasonalityFeatures:
+    """Tests for the add_seasonal_features convenience function."""
+
+    @pytest.fixture
+    def daily_df(self):
+        """One year of daily data."""
+        dates = pd.date_range("2024-01-01", periods=365, freq="D")
+        return pd.DataFrame({"sales": np.random.default_rng(42).normal(100, 10, 365)},
+                            index=dates)
+
+    def test_default_column_count(self, daily_df):
+        """Default (K=6) should produce 7 dummies + 12 Fourier = 19 new columns."""
+        result = add_seasonal_features(daily_df)
+        new_cols = [c for c in result.columns if c != "sales"]
+        assert len(new_cols) == 19
+
+    def test_dow_dummy_names(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        for i in range(7):
+            assert f"dow_{i}" in result.columns
+
+    def test_fourier_column_names(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        for k in range(1, 7):
+            assert f"fy_sin_{k}" in result.columns
+            assert f"fy_cos_{k}" in result.columns
+
+    def test_no_raw_integer_dayofweek(self, daily_df):
+        """The raw integer dayofweek column should be dropped, not kept."""
+        result = add_seasonal_features(daily_df)
+        assert "dayofweek" not in result.columns
+
+    def test_dummies_are_binary(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        for i in range(7):
+            col = result[f"dow_{i}"]
+            assert set(col.unique()) <= {0, 1}
+
+    def test_exactly_one_dummy_active_per_row(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        dummy_cols = [f"dow_{i}" for i in range(7)]
+        assert (result[dummy_cols].sum(axis=1) == 1).all()
+
+    def test_fourier_bounded(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        fourier_cols = [c for c in result.columns if c.startswith("fy_")]
+        for col in fourier_cols:
+            assert result[col].between(-1, 1).all()
+
+    def test_disable_dummies(self, daily_df):
+        result = add_seasonal_features(daily_df, include_dow_dummies=False)
+        assert not any(c.startswith("dow_") for c in result.columns)
+        fourier_cols = [c for c in result.columns if c.startswith("fy_")]
+        assert len(fourier_cols) == 12
+
+    def test_disable_fourier(self, daily_df):
+        result = add_seasonal_features(daily_df, yearly_k=0)
+        fourier_cols = [c for c in result.columns if c.startswith("fy_")]
+        assert len(fourier_cols) == 0
+        assert any(c.startswith("dow_") for c in result.columns)
+
+    def test_custom_fourier_k(self, daily_df):
+        result = add_seasonal_features(daily_df, yearly_k=3)
+        fourier_cols = [c for c in result.columns if c.startswith("fy_")]
+        assert len(fourier_cols) == 6  # 3 sin + 3 cos
+
+    def test_custom_fourier_prefix(self, daily_df):
+        result = add_seasonal_features(daily_df, fourier_prefix="yearly")
+        assert any(c.startswith("yearly_") for c in result.columns)
+        assert not any(c.startswith("fy_") for c in result.columns)
+
+    def test_original_columns_preserved(self, daily_df):
+        result = add_seasonal_features(daily_df)
+        assert "sales" in result.columns
+        assert len(result) == len(daily_df)
+
+    def test_leakage_free(self, daily_df):
+        """Seasonal features are deterministic functions of the timestamp,
+        so they should be identical regardless of the target values."""
+        result1 = add_seasonal_features(daily_df)
+        df2 = daily_df.copy()
+        df2["sales"] = 0  # zero out target
+        result2 = add_seasonal_features(df2)
+        seasonal_cols = [c for c in result1.columns if c != "sales"]
+        for col in seasonal_cols:
+            assert (result1[col] == result2[col]).all(), (
+                f"{col} changed when target was zeroed — leakage!"
+            )
 
 
 # ---------------------------------------------------------------------------

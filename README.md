@@ -22,7 +22,7 @@ Each article in the series is paired with a self-contained Jupyter notebook, reu
 | 6 | [Lag Features: Teaching Your Model to Remember the Past](https://medium.com/@asidd24/lag-features-teaching-your-model-to-remember-the-past-005a0493ed32?postPublishedType=initial) | [`06_lag_features.ipynb`](notebooks/06_lag_features.ipynb) | ✅ |
 | 7 | [Window Features: Rolling, Expanding & Exponential Smoothing](https://medium.com/@asidd24/window-features-rolling-expanding-exponential-smoothing-b8470fd0bbbf?postPublishedType=initial) | [`07_window_features.ipynb`](notebooks/07_window_features.ipynb) | ✅ |
 | 8 | [Trend Features: Making Tree-Based Models Extrapolate](https://medium.com/@asidd24/trend-features-making-tree-based-models-extrapolate-11af78cc2435) | [`08_trend_features.ipynb`](notebooks/08_trend_features.ipynb) | ✅ |
-| 9 | Seasonality Features: Dummies, Fourier Terms & Beyond | `09_seasonality.ipynb` | 📝 |
+| 9 | Seasonality Features: Dummies, Fourier Terms & Beyond | [`09_seasonality.ipynb`](notebooks/09_seasonality.ipynb) | ✅ |
 | 10 | Datetime & Categorical Features: The Last Mile | `10_datetime_categorical.ipynb` | 📝 |
 
 *✅ Published · 🔜 In progress · 📝 Planned*
