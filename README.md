@@ -2,7 +2,7 @@
 
 **Production-grade feature engineering for time series forecasting and anomaly detection — with runnable code, real datasets, and no leakage.**
 
-This is the companion code repository for a 10-part article series covering the feature engineering techniques that separate a demo notebook from a forecasting model that survives production.
+This is the companion code repository for a 10-part article series — now complete — covering the feature engineering techniques that separate a demo notebook from a forecasting model that survives production.
 
 Each article in the series is paired with a self-contained Jupyter notebook, reusable utility modules, and a working end-to-end example.
 
@@ -128,7 +128,7 @@ The notebooks use a mix of **synthetic data** (for reproducibility and pedagogic
 | Source | Domain | Notebook |
 |---|---|---|
 | Synthetic (generated in `src/data.py`) | General | All notebooks |
-| [M5 Forecasting](https://www.kaggle.com/c/m5-forecasting-accuracy) | Retail | 6-10 |
+| [M5 Forecasting](https://www.kaggle.com/c/m5-forecasting-accuracy) | Retail | 6-9 |
 | [Store Sales - Time Series Forecasting](https://www.kaggle.com/competitions/store-sales-time-series-forecasting) | Retail | 4-5 |
 | [ETT (Electricity Transformer)](https://github.com/zhouhaoyi/ETDataset) | Energy | 3, 7 |
 | [Wikipedia Web Traffic](https://www.kaggle.com/c/web-traffic-time-series-forecasting) | Web analytics | 8-9 |
