@@ -90,5 +90,20 @@ that accompanies it, and the specific `src/` utilities it uses.
 ## Article 9 — Seasonality Features
 - **Notebook:** [`notebooks/09_seasonality.ipynb`](../notebooks/09_seasonality.ipynb)
 
-## Article 10 — Datetime & Categorical Features
+## Article 10 — Datetime & Categorical Features: The Last Mile
 - **Notebook:** [`notebooks/10_datetime_categorical.ipynb`](../notebooks/10_datetime_categorical.ipynb)
+- **Figures / reproducible numbers:** [`article10_medium/make_figures.py`](https://github.com/Ameen2488/time-series-feature-engineering) (companion-article repo)
+- **Utilities used:**
+  - `src.data.generate_holiday_calendar`
+  - `src.data.generate_store_panel`
+  - `src.features.add_holiday_distance_features`
+  - `src.features.add_business_day_features`
+  - `src.features.add_event_features`
+  - `src.features.as_categorical`
+  - `src.features.target_encode_naive`
+  - `src.features.target_encode_expanding`
+  - `src.features.target_encode_out_of_fold`
+  - `src.features.add_lag_features_horizon_aware`
+  - `src.features.add_rolling_features`
+  - `src.features.add_seasonal_features`
+  - `src.metrics.wmape`

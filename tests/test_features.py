@@ -13,11 +13,14 @@ import pytest
 
 from src.features import (
     add_anomaly_features,
+    add_business_day_features,
     add_cyclical_encoding,
     add_datetime_features,
+    add_event_features,
     add_ewm_features,
     add_expanding_features,
     add_fourier_terms,
+    add_holiday_distance_features,
     add_lag_features,
     add_lag_features_horizon_aware,
     add_linear_trend,
@@ -26,6 +29,7 @@ from src.features import (
     add_polynomial_trend,
     add_rolling_features,
     add_seasonal_features,
+    as_categorical,
     build_forecasting_feature_matrix,
     cross_correlation,
     detrend_series,
@@ -36,6 +40,9 @@ from src.features import (
     seasonal_fill,
     stl_anomalies,
     stl_imputation,
+    target_encode_expanding,
+    target_encode_naive,
+    target_encode_out_of_fold,
 )
 
 
@@ -542,5 +549,161 @@ class TestOutlierDetection:
         assert "residual_volatility" in feats.columns
         assert "is_extreme_residual" in feats.columns
         assert "days_since_last_anomaly" in feats.columns
+
+
+# ---------------------------------------------------------------------------
+# Event & calendar features (Article 10)
+# ---------------------------------------------------------------------------
+
+class TestEventFeatures:
+    @pytest.fixture
+    def calendar_df(self) -> pd.DataFrame:
+        dates = pd.date_range("2024-01-01", periods=60, freq="D")
+        return pd.DataFrame({"date": dates, "sales": np.arange(60, dtype=float)})
+
+    @pytest.fixture
+    def holidays(self) -> pd.DataFrame:
+        # Jan 1 and Jan 31 of the same range as calendar_df
+        return pd.DataFrame({"date": pd.to_datetime(["2024-01-01", "2024-01-31"])})
+
+    def test_is_holiday_flag(self, calendar_df, holidays):
+        res = add_holiday_distance_features(calendar_df, holidays, date_col="date")
+        assert res.loc[res["date"] == "2024-01-01", "is_holiday"].item() == 1
+        assert res.loc[res["date"] == "2024-01-15", "is_holiday"].item() == 0
+
+    def test_days_to_and_since_holiday(self, calendar_df, holidays):
+        res = add_holiday_distance_features(calendar_df, holidays, date_col="date")
+        row = res.loc[res["date"] == "2024-01-10"].iloc[0]
+        # 2024-01-10 is 21 days before Jan 31 and 9 days after Jan 1
+        assert row["days_to_holiday"] == 21
+        assert row["days_since_holiday"] == 9
+
+    def test_holiday_distance_is_clipped(self, calendar_df, holidays):
+        res = add_holiday_distance_features(calendar_df, holidays, date_col="date", max_distance=5)
+        assert (res["days_to_holiday"] <= 5).all()
+        assert (res["days_since_holiday"] <= 5).all()
+
+    def test_holiday_features_use_only_known_calendar(self, calendar_df, holidays):
+        """The calendar itself carries no information from `sales` — the
+        columns are a function of date and the holiday list alone, so they
+        are identical regardless of what the target does."""
+        shuffled = calendar_df.copy()
+        shuffled["sales"] = shuffled["sales"].sample(frac=1, random_state=0).to_numpy()
+        res_a = add_holiday_distance_features(calendar_df, holidays, date_col="date")
+        res_b = add_holiday_distance_features(shuffled, holidays, date_col="date")
+        cols = ["is_holiday", "days_to_holiday", "days_since_holiday"]
+        pd.testing.assert_frame_equal(res_a[cols], res_b[cols])
+
+    def test_business_day_month_end(self, calendar_df):
+        res = add_business_day_features(calendar_df, date_col="date")
+        # Jan 2024: the 31st is a Wednesday, a business day itself
+        assert res.loc[res["date"] == "2024-01-31", "is_month_end_bday"].item() == 1
+        assert res.loc[res["date"] == "2024-01-31", "bdays_to_month_end"].item() == 0
+        assert res.loc[res["date"] == "2024-01-01", "bdays_to_month_end"].item() > 0
+
+    def test_add_event_features_combines_both(self, calendar_df, holidays):
+        res = add_event_features(calendar_df, holidays, date_col="date")
+        for col in ["is_holiday", "days_to_holiday", "days_since_holiday",
+                    "is_month_end_bday", "bdays_to_month_end"]:
+            assert col in res.columns
+
+    def test_holidays_requires_at_least_one_date(self, calendar_df):
+        with pytest.raises(ValueError):
+            add_holiday_distance_features(calendar_df, pd.DataFrame({"date": []}), date_col="date")
+
+
+# ---------------------------------------------------------------------------
+# Categorical encoding for panel data (Article 10)
+# ---------------------------------------------------------------------------
+
+class TestCategoricalEncoding:
+    @pytest.fixture
+    def panel_df(self) -> pd.DataFrame:
+        """Two stores, 10 days each, sorted by [store, date] — a deterministic
+        target so exact encoding values can be checked by hand."""
+        dates = pd.date_range("2024-01-01", periods=10, freq="D")
+        rows = []
+        for store, base in [("A", 10.0), ("B", 100.0)]:
+            for i, d in enumerate(dates):
+                rows.append({"store": store, "date": d, "y": base + i})
+        return pd.DataFrame(rows).sort_values(["store", "date"]).reset_index(drop=True)
+
+    def test_as_categorical_dtype(self, panel_df):
+        res = as_categorical(panel_df, ["store"])
+        assert str(res["store"].dtype) == "category"
+
+    def test_naive_encoding_includes_own_row(self, panel_df):
+        res = target_encode_naive(panel_df, "store", "y")
+        expected_a = panel_df.loc[panel_df["store"] == "A", "y"].mean()
+        assert np.isclose(res.loc[res["store"] == "A", "store_te_naive"].iloc[0], expected_a)
+
+    def test_expanding_encoding_excludes_own_row(self, panel_df):
+        res = target_encode_expanding(panel_df, "store", "y")
+        store_a = res[res["store"] == "A"].reset_index(drop=True)
+        # Row 0 of store A has no prior observation -> falls back to global prior
+        global_prior = panel_df["y"].mean()
+        assert np.isclose(store_a.loc[0, "store_te_expanding"], global_prior)
+        # Row 2 (y=12) should equal the mean of rows 0-1 (y=10, 11) = 10.5
+        assert np.isclose(store_a.loc[2, "store_te_expanding"], 10.5)
+
+    def test_expanding_encoding_never_leaks_current_target(self, panel_df):
+        """For every row, the expanding-encoded value must be computable from
+        strictly earlier rows of the same category only."""
+        res = target_encode_expanding(panel_df, "store", "y")
+        for store, grp in res.groupby("store"):
+            grp = grp.reset_index(drop=True)
+            for i in range(1, len(grp)):
+                expected = grp.loc[:i - 1, "y"].mean()
+                assert np.isclose(grp.loc[i, "store_te_expanding"], expected)
+
+    def test_expanding_encoding_cold_start_unseen_category(self, panel_df):
+        """A category never seen before in the frame falls back to the
+        global prior (computed over the frame given) rather than raising or
+        returning NaN."""
+        new_row = pd.DataFrame({"store": ["C"], "date": [pd.Timestamp("2024-01-11")], "y": [999.0]})
+        combined = pd.concat([panel_df, new_row], ignore_index=True)
+        res = target_encode_expanding(combined, "store", "y")
+        assert np.isclose(res.iloc[-1]["store_te_expanding"], combined["y"].mean())
+
+    def test_smoothing_pulls_sparse_levels_toward_global_mean(self, panel_df):
+        unsmoothed = target_encode_expanding(panel_df, "store", "y", smoothing=0.0)
+        smoothed = target_encode_expanding(panel_df, "store", "y", smoothing=50.0)
+        global_prior = panel_df["y"].mean()
+        # With heavy smoothing, later rows should sit closer to the global
+        # prior than the unsmoothed expanding mean does.
+        row = 5
+        store_a_unsmoothed = unsmoothed[unsmoothed["store"] == "A"].reset_index(drop=True)
+        store_a_smoothed = smoothed[smoothed["store"] == "A"].reset_index(drop=True)
+        d_unsmoothed = abs(store_a_unsmoothed.loc[row, "store_te_expanding"] - global_prior)
+        d_smoothed = abs(store_a_smoothed.loc[row, "store_te_expanding"] - global_prior)
+        assert d_smoothed < d_unsmoothed
+
+    def test_out_of_fold_encoding_fits_on_train_rows_only(self, panel_df):
+        # panel_df is sorted [store, date]: rows 0-9 = store A (10 days),
+        # rows 10-19 = store B (10 days). Split each store's own first 5
+        # days into train and last 5 into val, so both folds contain both
+        # categories.
+        train_idx = np.concatenate([np.arange(0, 5), np.arange(10, 15)])
+        val_idx = np.concatenate([np.arange(5, 10), np.arange(15, 20)])
+        folds = [(train_idx, val_idx)]
+        res = target_encode_out_of_fold(panel_df, "store", "y", folds=folds)
+
+        train = panel_df.iloc[train_idx]
+        expected_map = train.groupby("store")["y"].mean()
+
+        val = res.iloc[val_idx]
+        for _, row in val.iterrows():
+            assert np.isclose(row["store_te_oof"], expected_map[row["store"]])
+        # Rows outside any fold's val_idx are left as NaN
+        assert res.iloc[train_idx]["store_te_oof"].isna().all()
+
+    def test_out_of_fold_encoding_unseen_category_falls_back(self, panel_df):
+        n = len(panel_df)
+        folds = [(np.arange(0, n - 1), np.array([n - 1]))]
+        df = panel_df.copy()
+        df.loc[df.index[-1], "store"] = "UNSEEN"
+        res = target_encode_out_of_fold(df, "store", "y", folds=folds)
+        train_prior = df.iloc[: n - 1]["y"].mean()
+        assert np.isclose(res.iloc[-1]["store_te_oof"], train_prior)
 
 

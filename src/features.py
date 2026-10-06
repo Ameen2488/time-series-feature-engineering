@@ -1101,3 +1101,331 @@ def add_anomaly_features(
     return features
 
 
+# ---------------------------------------------------------------------------
+# Event & calendar features (Article 10)
+#
+# Events are not seasonality: a day-of-year Fourier term can only memorise
+# "something happened around day 328 in the years it saw." Floating events
+# (Black Friday, Easter, paydays) land on a different day-of-year every
+# year, so they need to be represented directly from a known calendar
+# rather than inferred from the date's position in the year. All functions
+# below are leakage-safe as long as the calendar they're given is genuinely
+# known in advance of the forecast date — see each docstring for the test.
+# ---------------------------------------------------------------------------
+
+def add_holiday_distance_features(
+    df: pd.DataFrame,
+    holidays: pd.DataFrame,
+    date_col: str | None = None,
+    max_distance: int = 60,
+) -> pd.DataFrame:
+    """
+    Add a holiday flag plus signed distance to the nearest known event.
+
+    A flag alone tells a tree model "this day is special"; it cannot
+    represent the ramp-up before an event or the hangover after it. The two
+    distance columns let the model learn those shapes directly.
+
+    Leakage-safe as long as `holidays` is a calendar known in advance (a
+    public holiday list, a planned promotion calendar) rather than something
+    back-filled from what actually happened — Rule 1 in Article 10: can you
+    fill this column 30+ days ahead of the forecast date?
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    holidays : pd.DataFrame
+        Must have a 'date' column of known event dates. Rows may repeat a
+        date (e.g. Thanksgiving and Black Friday) — duplicates are fine.
+    date_col : str, optional
+        Column with datetime values. If None, uses the DataFrame's index
+        (which must be a DatetimeIndex).
+    max_distance : int, default=60
+        Clip the two distance columns at this many days, so far-from-any-
+        holiday rows don't carry an unbounded, mostly-uninformative value.
+
+    Returns
+    -------
+    pd.DataFrame with 'is_holiday', 'days_to_holiday', 'days_since_holiday'
+    columns appended.
+    """
+    d = df.copy()
+    dates = (d[date_col] if date_col else d.index).to_numpy(dtype="datetime64[D]")
+
+    h = np.sort(np.unique(pd.to_datetime(holidays["date"]).to_numpy(dtype="datetime64[D]")))
+    if len(h) == 0:
+        raise ValueError("`holidays` must contain at least one date.")
+
+    d["is_holiday"] = np.isin(dates, h).astype(int)
+
+    nxt = np.searchsorted(h, dates, side="left")
+    prv = np.searchsorted(h, dates, side="right") - 1
+
+    days_to = np.where(
+        nxt < len(h),
+        (h[np.minimum(nxt, len(h) - 1)] - dates).astype("timedelta64[D]").astype(float),
+        float(max_distance),
+    )
+    days_since = np.where(
+        prv >= 0,
+        (dates - h[np.maximum(prv, 0)]).astype("timedelta64[D]").astype(float),
+        float(max_distance),
+    )
+
+    d["days_to_holiday"] = np.clip(days_to, 0, max_distance)
+    d["days_since_holiday"] = np.clip(days_since, 0, max_distance)
+    return d
+
+
+def add_business_day_features(
+    df: pd.DataFrame,
+    date_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Add payday / business-day-of-month structure.
+
+    Demand that is payroll-driven moves with the business-day calendar, not
+    the plain date — a month-end that falls on a Saturday pays out on the
+    preceding Friday. Fully deterministic from the calendar alone, so safe
+    to build on the full frame before any split.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    date_col : str, optional
+        Column with datetime values. If None, uses the DataFrame's index.
+
+    Returns
+    -------
+    pd.DataFrame with 'is_month_end_bday' and 'bdays_to_month_end' columns
+    appended.
+    """
+    d = df.copy()
+    dates = d[date_col] if date_col else d.index.to_series(index=d.index)
+
+    month_end_bday = dates + pd.offsets.BMonthEnd(0)
+    d["is_month_end_bday"] = (dates.values == month_end_bday.values).astype(int)
+    d["bdays_to_month_end"] = np.array(
+        [np.busday_count(a.date(), b.date()) for a, b in zip(dates, month_end_bday)]
+    )
+    return d
+
+
+def add_event_features(
+    df: pd.DataFrame,
+    holidays: pd.DataFrame,
+    date_col: str | None = None,
+    max_distance: int = 60,
+) -> pd.DataFrame:
+    """
+    The complete event feature recipe for Article 10: holiday flag and
+    distance, plus payday / business-day structure, in one call.
+
+    Equivalent to calling `add_holiday_distance_features` then
+    `add_business_day_features`. Build this on the full panel before
+    splitting — every column is known in advance from the calendar alone.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    holidays : pd.DataFrame
+        DataFrame with a 'date' column of known event dates (see
+        `add_holiday_distance_features`; `src.data.generate_holiday_calendar`
+        builds a synthetic one for demonstrations).
+    date_col : str, optional
+    max_distance : int, default=60
+
+    Returns
+    -------
+    pd.DataFrame with the five event/calendar columns appended.
+    """
+    d = add_holiday_distance_features(df, holidays, date_col=date_col, max_distance=max_distance)
+    d = add_business_day_features(d, date_col=date_col)
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Categorical encoding for panel data (Article 10)
+#
+# A panel brings a column single series never had: store_id, sku, region.
+# `as_categorical` hands it to a tree model with no fitting at all. The
+# target-encoding functions below replace a category with a statistic of
+# the target — which makes them *fitted* features, subject to the same
+# leakage discipline as any other fitted feature (Article 3): compute them
+# using only information available at prediction time.
+# ---------------------------------------------------------------------------
+
+def as_categorical(df: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
+    """
+    Cast columns to pandas 'category' dtype.
+
+    LightGBM (and CatBoost) split on a 'category' column natively, without
+    needing a one-hot expansion. The cheapest categorical encoding there is,
+    and a strong default when cardinality is more than a handful of levels.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    cols : sequence of str
+        Columns to cast.
+
+    Returns
+    -------
+    pd.DataFrame with the listed columns cast to 'category' dtype.
+    """
+    d = df.copy()
+    for c in cols:
+        d[c] = d[c].astype("category")
+    return d
+
+
+def target_encode_naive(
+    df: pd.DataFrame,
+    group_col: str,
+    target_col: str,
+    new_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Replace each category with the mean of the target **including the row's
+    own value**.
+
+    This leaks: at prediction time you do not have the row's own target yet.
+    Included for comparison in Article 10's leakage experiment — do not use
+    this in a real pipeline. See `target_encode_expanding` for the
+    leak-safe equivalent.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    group_col : str
+        Categorical column to encode (e.g. 'store_id').
+    target_col : str
+    new_col : str, optional
+        Defaults to f"{group_col}_te_naive".
+
+    Returns
+    -------
+    pd.DataFrame with the naive target-encoded column appended.
+    """
+    d = df.copy()
+    new_col = new_col or f"{group_col}_te_naive"
+    d[new_col] = d.groupby(group_col)[target_col].transform("mean")
+    return d
+
+
+def target_encode_expanding(
+    df: pd.DataFrame,
+    group_col: str,
+    target_col: str,
+    new_col: str | None = None,
+    min_periods: int = 1,
+    smoothing: float = 0.0,
+) -> pd.DataFrame:
+    """
+    Replace each category with the expanding mean of the target using only
+    **strictly earlier** rows of that category — leak-safe in time.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must be sorted by date within each group (e.g. sort by
+        [group_col, date_col] before calling).
+    group_col : str
+        Categorical column to encode.
+    target_col : str
+    new_col : str, optional
+        Defaults to f"{group_col}_te_expanding".
+    min_periods : int, default=1
+        Minimum number of prior observations before a value is produced.
+    smoothing : float, default=0.0
+        Blend the expanding mean toward the global target mean for
+        categories with few prior observations: weight = n / (n +
+        smoothing). 0 disables smoothing. Use a larger value (e.g. 10-50)
+        when some categories have sparse history.
+
+    Returns
+    -------
+    pd.DataFrame with the expanding target-encoded column appended. Rows
+    with no prior observation for their category (including every row of a
+    category never seen before, i.e. true cold start) fall back to the
+    global target mean.
+    """
+    d = df.copy()
+    new_col = new_col or f"{group_col}_te_expanding"
+    global_prior = float(d[target_col].mean())
+
+    shifted = d.groupby(group_col)[target_col].shift(1)
+    grouped = shifted.groupby(d[group_col])
+    exp_mean = grouped.expanding(min_periods=min_periods).mean().reset_index(level=0, drop=True)
+
+    if smoothing > 0:
+        exp_count = grouped.expanding(min_periods=min_periods).count().reset_index(level=0, drop=True)
+        w = exp_count / (exp_count + smoothing)
+        encoded = w * exp_mean + (1 - w) * global_prior
+    else:
+        encoded = exp_mean
+
+    d[new_col] = encoded.fillna(global_prior)
+    return d
+
+
+def target_encode_out_of_fold(
+    df: pd.DataFrame,
+    group_col: str,
+    target_col: str,
+    folds: Sequence[tuple[np.ndarray, np.ndarray]],
+    new_col: str | None = None,
+    smoothing: float = 0.0,
+) -> pd.DataFrame:
+    """
+    Out-of-fold target encoding: for each CV fold, fit the category means on
+    the fold's training rows only and apply them to the fold's validation
+    rows — the discipline from Article 10's Rule 2, "refit inside every CV
+    fold," applied directly rather than demonstrated as an anti-pattern.
+
+    Designed to consume the splits produced by
+    `src.validation.make_walk_forward_splitter` (or any iterable of
+    (train_idx, val_idx) positional-index pairs with time-respecting folds).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    group_col : str
+        Categorical column to encode.
+    target_col : str
+    folds : sequence of (train_idx, val_idx)
+        Positional index arrays. Rows not covered by any fold's val_idx
+        (e.g. the initial training-only block) are left as NaN.
+    new_col : str, optional
+        Defaults to f"{group_col}_te_oof".
+    smoothing : float, default=0.0
+        As in `target_encode_expanding`.
+
+    Returns
+    -------
+    pd.DataFrame with the out-of-fold target-encoded column appended.
+    Categories unseen in a fold's training rows fall back to that fold's
+    global training mean.
+    """
+    d = df.copy()
+    new_col = new_col or f"{group_col}_te_oof"
+    encoded = np.full(len(d), np.nan)
+
+    for train_idx, val_idx in folds:
+        train = d.iloc[train_idx]
+        global_prior = float(train[target_col].mean())
+        stats = train.groupby(group_col)[target_col].agg(["mean", "count"])
+
+        if smoothing > 0:
+            w = stats["count"] / (stats["count"] + smoothing)
+            enc_map = w * stats["mean"] + (1 - w) * global_prior
+        else:
+            enc_map = stats["mean"]
+
+        val_groups = d.iloc[val_idx][group_col]
+        encoded[val_idx] = val_groups.map(enc_map).fillna(global_prior).to_numpy()
+
+    d[new_col] = encoded
+    return d
+
+
